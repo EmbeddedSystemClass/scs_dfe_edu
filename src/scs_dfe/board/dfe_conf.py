@@ -16,8 +16,6 @@ from scs_core.data.json import PersistentJSONable
 from scs_core.gas.afe_baseline import AFEBaseline
 from scs_core.gas.afe_calib import AFECalib
 
-from scs_dfe.board.mcp9808 import MCP9808
-
 from scs_dfe.gas.afe import AFE
 
 
@@ -42,7 +40,7 @@ class DFEConf(PersistentJSONable):
 
     @staticmethod
     def board_temp_sensor():
-        return MCP9808(True)
+        return None
 
 
     # ----------------------------------------------------------------------------------------------------------------
