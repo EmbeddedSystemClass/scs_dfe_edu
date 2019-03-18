@@ -1,10 +1,15 @@
 """
-Created on 10 Jul 2016
+Created on 18 Mar 2018
 
 @author: Bruno Beloff (bruno.beloff@southcoastscience.com)
+
+Compatibility with the scs_dfe_eng AFE interface
 """
 
 import time
+
+from scs_core.gas.a4_datum import A4Datum
+from scs_core.gas.d4_datum import D4Datum
 
 from scs_core.gas.afe_datum import AFEDatum
 
@@ -15,22 +20,14 @@ from scs_dfe.gas.ads1115 import ADS1115
 
 class AFE(object):
     """
-    Alphasense Analogue Front-End (AFE) with Ti ADS1115 ADC (gases)
+    Alphasense Educational Board with Ti ADS1115 ADC
     """
+
+    __H2S_GAIN_INDEX = 3            # ADS1115.GAIN_2p048
+    __CO_GAIN_INDEX = 3             # ADS1115.GAIN_2p048
     __RATE = ADS1115.RATE_8
 
-    __MUX = (ADS1115.MUX_A0_GND, )
-
-
-    # ----------------------------------------------------------------------------------------------------------------
-
-    @classmethod
-    def __no2_sample(cls, samples):
-        for sample in samples:
-            if sample[0] == 'NO2':
-                return sample[1]
-
-        return None
+    __MUX = (ADS1115.MUX_A0_GND, ADS1115.MUX_A2_GND, ADS1115.MUX_A3_GND)
 
 
     # ----------------------------------------------------------------------------------------------------------------
@@ -40,115 +37,69 @@ class AFE(object):
         """
         Constructor
         """
-        self.__pt1000 = None
         self.__sensors = sensors
 
         self.__wrk_adc = ADS1115(ADS1115.ADDR_WRK, AFE.__RATE)
         self.__aux_adc = ADS1115(ADS1115.ADDR_AUX, AFE.__RATE)
-
-        self.__pt1000_adc = None
 
         self.__tconv = self.__wrk_adc.tconv
 
 
     # ----------------------------------------------------------------------------------------------------------------
 
+    # noinspection PyUnusedLocal
     def sample(self, sht_datum=None):
         # temperature...
-        pt1000_datum = self.sample_pt1000()
         temp = self.sample_temp(sht_datum)
 
         # gases...
         samples = []
-        no2_sample = None
 
-        for sensor_index in range(len(self.__sensors)):
-            sensor = self.__sensors[sensor_index]
+        # NO2...
+        sample = self.__sensors[0].sample(self, temp, 0, None)
 
-            if sensor is None:
-                continue
+        samples.append(('NO2', sample))
 
-            # cross-sensitivity sample...
-            if sensor.has_no2_cross_sensitivity():
-                no2_sample = AFE.__no2_sample(samples)
+        # H2S...
+        we_v = self.sample_raw_wrk(1, self.__H2S_GAIN_INDEX)
+        sample = D4Datum(we_v)
 
-            # sample...
-            sample = sensor.sample(self, temp, sensor_index, no2_sample)
+        samples.append(('H2S', sample))
 
-            samples.append((sensor.gas_name, sample))
+        # CO...
+        we_v = self.sample_raw_wrk(2, self.__CO_GAIN_INDEX)
+        sample = D4Datum(we_v)
 
-        return AFEDatum(pt1000_datum, *samples)
+        samples.append(('CO', sample))
 
-
-    def sample_station(self, sn, sht_datum=None):
-        # temperature...
-        pt1000_datum = self.sample_pt1000()
-        temp = self.sample_temp(sht_datum)
-
-        # gas...
-        index = sn - 1
-
-        sensor = self.__sensors[index]
-
-        if sensor is None:
-            return AFEDatum(pt1000_datum)
-
-        # cross-sensitivity sample...
-        if sensor.has_no2_cross_sensitivity():
-            no2_index, no2_sensor = self.__no2_sensor()
-            no2_sample = no2_sensor.sample(self, temp, no2_index)
-        else:
-            no2_sample = None
-
-        # sample...
-        sample = sensor.sample(self, temp, index, no2_sample)
-
-        return AFEDatum(pt1000_datum, (sensor.gas_name, sample))
+        return AFEDatum(None, *samples)
 
 
-    def null_datum(self):
-        pt1000_datum = self.sample_pt1000()
+    @classmethod
+    def null_datum(cls):
+        samples = [
+            ('NO2', A4Datum(None, None)),
+            ('H2S', D4Datum(None)),
+            ('CO', D4Datum(None)),
+        ]
 
-        samples = []
-
-        for sensor_index in range(len(self.__sensors)):
-            sensor = self.__sensors[sensor_index]
-
-            if sensor is None:
-                continue
-
-            samples.append((sensor.gas_name, sensor.null_datum()))
-
-        return AFEDatum(pt1000_datum, *samples)
+        return AFEDatum(None, *samples)
 
 
-    def sample_temp(self, sht_datum):
-        if sht_datum is not None:
-            return sht_datum.temp
-
-        pt1000_datum = self.sample_pt1000()
-
-        return None if pt1000_datum is None else pt1000_datum.temp
-
-
-    def sample_pt1000(self):
-        if self.__pt1000 is None:
+    @staticmethod
+    def sample_temp(sht_datum):
+        if sht_datum is None:
             return None
 
-        try:
-            return self.__pt1000.sample(self)
-
-        except OSError:
-            return self.__pt1000.null_datum()
+        return sht_datum.temp
 
 
     # ----------------------------------------------------------------------------------------------------------------
 
     def sample_raw_wrk_aux(self, sensor_index, gain_index):
         try:
-            gain = ADS1115.gain(gain_index)
-
             mux = AFE.__MUX[sensor_index]
+            gain = ADS1115.gain(gain_index)
 
             self.__wrk_adc.start_conversion(mux, gain)
             self.__aux_adc.start_conversion(mux, gain)
@@ -167,9 +118,8 @@ class AFE(object):
 
     def sample_raw_wrk(self, sensor_index, gain_index):
         try:
-            gain = ADS1115.gain(gain_index)
-
             mux = AFE.__MUX[sensor_index]
+            gain = ADS1115.gain(gain_index)
 
             self.__wrk_adc.start_conversion(mux, gain)
 
@@ -183,35 +133,7 @@ class AFE(object):
             self.__wrk_adc.release_lock()
 
 
-    def sample_raw_tmp(self):
-        if self.__pt1000_adc is None:
-            return None
-
-        try:
-            self.__pt1000_adc.start_conversion()
-
-            time.sleep(self.__pt1000_adc.tconv)
-
-            return self.__pt1000_adc.read_conversion()
-
-        finally:
-            self.__pt1000_adc.release_lock()
-
-
-    # ----------------------------------------------------------------------------------------------------------------
-
-    def __no2_sensor(self):
-        for index in range(len(self.__sensors)):
-            if self.__sensors[index].gas_name == 'NO2':
-                return index, self.__sensors[index]
-
-        return None
-
-
     # ----------------------------------------------------------------------------------------------------------------
 
     def __str__(self, *args, **kwargs):
-        sensors = '[' + ', '.join(str(sensor) for sensor in self.__sensors) + ']'
-
-        return "AFE:{pt1000:%s, sensors:%s, tconv:%0.3f, wrk_adc:%s, aux_adc:%s, pt1000_adc:%s}" % \
-            (self.__pt1000, sensors, self.__tconv, self.__wrk_adc, self.__aux_adc, self.__pt1000_adc)
+        return "AFE:{tconv:%0.3f, wrk_adc:%s, aux_adc:%s}" %  (self.__tconv, self.__wrk_adc, self.__aux_adc)

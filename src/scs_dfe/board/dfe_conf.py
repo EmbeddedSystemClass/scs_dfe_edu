@@ -15,13 +15,13 @@ from scs_core.data.json import PersistentJSONable
 
 from scs_core.gas.afe_baseline import AFEBaseline
 from scs_core.gas.afe_calib import AFECalib
+from scs_core.gas.sensor import Sensor
 
 from scs_dfe.gas.afe import AFE
 
 
 # --------------------------------------------------------------------------------------------------------------------
 
-# noinspection PyUnusedLocal
 class DFEConf(PersistentJSONable):
     """
     classdocs
@@ -55,13 +55,11 @@ class DFEConf(PersistentJSONable):
 
     # ----------------------------------------------------------------------------------------------------------------
 
-    def __init__(self, pt1000_addr):
+    def __init__(self, _):
         """
         Constructor
         """
         super().__init__()
-
-        self.__pt1000_addr = pt1000_addr            # int
 
 
     # ----------------------------------------------------------------------------------------------------------------
@@ -69,28 +67,15 @@ class DFEConf(PersistentJSONable):
     def afe(self, host):
         # sensors...
         afe_calib = AFECalib.load(host)
-        afe_baseline = AFEBaseline.load(host)
 
-        sensors = afe_calib.sensors(afe_baseline)
+        if afe_calib is None:
+            sensors = [Sensor.SENSORS[Sensor.CODE_NO2]]
+
+        else:
+            afe_baseline = AFEBaseline.load(host)
+            sensors = afe_calib.sensors(afe_baseline)
 
         return AFE(self, None, sensors)
-
-
-    @staticmethod
-    def pt1000(host):
-        return None
-
-
-    @staticmethod
-    def pt1000_adc(gain, rate):
-        return None
-
-
-    # ----------------------------------------------------------------------------------------------------------------
-
-    @property
-    def pt1000_addr(self):
-        return None
 
 
     # ----------------------------------------------------------------------------------------------------------------
